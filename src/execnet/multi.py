@@ -1,37 +1,57 @@
-# -*- coding: utf-8 -*-
 """
 Managing Gateway Groups and interactions with multiple channels.
 
 (c) 2008-2014, Holger Krekel and others
 """
+
+from __future__ import annotations
+
 import atexit
-import sys
+import types
+from collections.abc import Callable
+from collections.abc import Iterable
+from collections.abc import Iterator
+from collections.abc import Sequence
 from functools import partial
 from threading import Lock
+from typing import TYPE_CHECKING
+from typing import Any
+from typing import Literal
+from typing import TypeAlias
+from typing import overload
 
 from . import gateway_bootstrap
 from . import gateway_io
+from .gateway_base import Channel
+from .gateway_base import ExecModel
+from .gateway_base import WorkerPool
 from .gateway_base import get_execmodel
-from .gateway_base import reraise
 from .gateway_base import trace
 from .xspec import XSpec
+
+if TYPE_CHECKING:
+    from .gateway import Gateway
+
 
 NO_ENDMARKER_WANTED = object()
 
 
-class Group(object):
-    """Gateway Groups."""
+class Group:
+    """Gateway Group."""
 
     defaultspec = "popen"
 
-    def __init__(self, xspecs=(), execmodel="thread"):
-        """initialize group and make gateways as specified.
-        execmodel can be 'thread' or 'eventlet'.
+    def __init__(
+        self, xspecs: Iterable[XSpec | str | None] = (), execmodel: str = "thread"
+    ) -> None:
+        """Initialize a group and make gateways as specified.
+
+        execmodel can be one of the supported execution models.
         """
-        self._gateways = []
+        self._gateways: list[Gateway] = []
         self._autoidcounter = 0
         self._autoidlock = Lock()
-        self._gateways_to_join = []
+        self._gateways_to_join: list[Gateway] = []
         # we use the same execmodel for all of the Gateway objects
         # we spawn on our side.  Probably we should not allow different
         # execmodels between different groups but not clear.
@@ -43,38 +63,38 @@ class Group(object):
         atexit.register(self._cleanup_atexit)
 
     @property
-    def execmodel(self):
+    def execmodel(self) -> ExecModel:
         return self._execmodel
 
     @property
-    def remote_execmodel(self):
+    def remote_execmodel(self) -> ExecModel:
         return self._remote_execmodel
 
-    def set_execmodel(self, execmodel, remote_execmodel=None):
+    def set_execmodel(
+        self, execmodel: str, remote_execmodel: str | None = None
+    ) -> None:
         """Set the execution model for local and remote site.
 
-        execmodel can be one of "thread" or "eventlet" (XXX gevent).
+        execmodel can be one of the supported execution models.
         It determines the execution model for any newly created gateway.
-        If remote_execmodel is not specified it takes on the value
-        of execmodel.
+        If remote_execmodel is not specified it takes on the value of execmodel.
 
         NOTE: Execution models can only be set before any gateway is created.
-
         """
         if self._gateways:
             raise ValueError(
-                "can not set execution models if " "gateways have been created already"
+                "can not set execution models if gateways have been created already"
             )
         if remote_execmodel is None:
             remote_execmodel = execmodel
         self._execmodel = get_execmodel(execmodel)
         self._remote_execmodel = get_execmodel(remote_execmodel)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         idgateways = [gw.id for gw in self]
         return "<Group %r>" % idgateways
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: int | str | Gateway) -> Gateway:
         if isinstance(key, int):
             return self._gateways[key]
         for gw in self._gateways:
@@ -82,21 +102,22 @@ class Group(object):
                 return gw
         raise KeyError(key)
 
-    def __contains__(self, key):
+    def __contains__(self, key: str) -> bool:
         try:
             self[key]
             return True
         except KeyError:
             return False
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._gateways)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Gateway]:
         return iter(list(self._gateways))
 
-    def makegateway(self, spec=None):
-        """create and configure a gateway to a Python interpreter.
+    def makegateway(self, spec: XSpec | str | None = None) -> Gateway:
+        """Create and configure a gateway to a Python interpreter.
+
         The ``spec`` string encodes the target gateway type
         and configuration information. The general format is::
 
@@ -108,7 +129,7 @@ class Group(object):
 
             id=<string>     specifies the gateway id
             python=<path>   specifies which python interpreter to execute
-            execmodel=model 'thread', 'eventlet', 'gevent' model for execution
+            execmodel=model 'thread', 'main_thread_only', 'eventlet', 'gevent' execution model
             chdir=<path>    specifies to which directory to change
             nice=<path>     specifies process priority of new process
             env:NAME=value  specifies a remote environment variable setting.
@@ -135,10 +156,10 @@ class Group(object):
         elif spec.socket:
             from . import gateway_socket
 
-            io = gateway_socket.create_io(spec, self, execmodel=self.execmodel)
-            gw = gateway_bootstrap.bootstrap(io, spec)
+            sio = gateway_socket.create_io(spec, self, execmodel=self.execmodel)
+            gw = gateway_bootstrap.bootstrap(sio, spec)
         else:
-            raise ValueError("no gateway type found for {!r}".format(spec._spec))
+            raise ValueError(f"no gateway type found for {spec._spec!r}")
         gw.spec = spec
         self._register(gw)
         if spec.chdir or spec.nice or spec.env:
@@ -157,58 +178,60 @@ class Group(object):
                         os.environ[name] = value
             """
             )
-            nice = spec.nice and int(spec.nice) or 0
+            nice = (spec.nice and int(spec.nice)) or 0
             channel.send((spec.chdir, nice, spec.env))
             channel.waitclose()
         return gw
 
-    def allocate_id(self, spec):
+    def allocate_id(self, spec: XSpec) -> None:
         """(re-entrant) allocate id for the given xspec object."""
         if spec.id is None:
             with self._autoidlock:
                 id = "gw" + str(self._autoidcounter)
                 self._autoidcounter += 1
                 if id in self:
-                    raise ValueError("already have gateway with id {!r}".format(id))
+                    raise ValueError(f"already have gateway with id {id!r}")
                 spec.id = id
 
-    def _register(self, gateway):
+    def _register(self, gateway: Gateway) -> None:
         assert not hasattr(gateway, "_group")
         assert gateway.id
-        assert id not in self
+        assert gateway.id not in self
         self._gateways.append(gateway)
         gateway._group = self
 
-    def _unregister(self, gateway):
+    def _unregister(self, gateway: Gateway) -> None:
         self._gateways.remove(gateway)
         self._gateways_to_join.append(gateway)
 
-    def _cleanup_atexit(self):
-        trace("=== atexit cleanup {!r} ===".format(self))
+    def _cleanup_atexit(self) -> None:
+        trace(f"=== atexit cleanup {self!r} ===")
         self.terminate(timeout=1.0)
 
-    def terminate(self, timeout=None):
-        """trigger exit of member gateways and wait for termination
-        of member gateways and associated subprocesses.  After waiting
-        timeout seconds try to to kill local sub processes of popen-
-        and ssh-gateways.  Timeout defaults to None meaning
-        open-ended waiting and no kill attempts.
-        """
+    def terminate(self, timeout: float | None = None) -> None:
+        """Trigger exit of member gateways and wait for termination
+        of member gateways and associated subprocesses.
 
+        After waiting timeout seconds try to to kill local sub processes of
+        popen- and ssh-gateways.
+
+        Timeout defaults to None meaning open-ended waiting and no kill
+        attempts.
+        """
         while self:
-            vias = {}
+            vias: set[str] = set()
             for gw in self:
                 if gw.spec.via:
-                    vias[gw.spec.via] = True
+                    vias.add(gw.spec.via)
             for gw in self:
                 if gw.id not in vias:
                     gw.exit()
 
-            def join_wait(gw):
+            def join_wait(gw: Gateway) -> None:
                 gw.join()
                 gw._io.wait()
 
-            def kill(gw):
+            def kill(gw: Gateway) -> None:
                 trace("Gateways did not come down after timeout: %r" % gw)
                 gw._io.kill()
 
@@ -222,10 +245,13 @@ class Group(object):
             )
             self._gateways_to_join[:] = []
 
-    def remote_exec(self, source, **kwargs):
+    def remote_exec(
+        self,
+        source: str | types.FunctionType | Callable[..., object] | types.ModuleType,
+        **kwargs,
+    ) -> MultiChannel:
         """remote_exec source on all member gateways and return
-        MultiChannel connecting to all sub processes.
-        """
+        a MultiChannel connecting to all sub processes."""
         channels = []
         for gw in self:
             channels.append(gw.remote_exec(source, **kwargs))
@@ -233,28 +259,38 @@ class Group(object):
 
 
 class MultiChannel:
-    def __init__(self, channels):
+    def __init__(self, channels: Sequence[Channel]) -> None:
         self._channels = channels
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._channels)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Channel]:
         return iter(self._channels)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: int) -> Channel:
         return self._channels[key]
 
-    def __contains__(self, chan):
+    def __contains__(self, chan: Channel) -> bool:
         return chan in self._channels
 
-    def send_each(self, item):
+    def send_each(self, item: object) -> None:
         for ch in self._channels:
             ch.send(item)
 
-    def receive_each(self, withchannel=False):
+    @overload
+    def receive_each(self, withchannel: Literal[False] = ...) -> list[Any]:
+        pass
+
+    @overload
+    def receive_each(self, withchannel: Literal[True]) -> list[tuple[Channel, Any]]:
+        pass
+
+    def receive_each(
+        self, withchannel: bool = False
+    ) -> list[tuple[Channel, Any]] | list[Any]:
         assert not hasattr(self, "_queue")
-        l = []
+        l: list[object] = []
         for ch in self._channels:
             obj = ch.receive()
             if withchannel:
@@ -263,17 +299,17 @@ class MultiChannel:
                 l.append(obj)
         return l
 
-    def make_receive_queue(self, endmarker=NO_ENDMARKER_WANTED):
+    def make_receive_queue(self, endmarker: object = NO_ENDMARKER_WANTED):
         try:
-            return self._queue
+            return self._queue  # type: ignore[has-type]
         except AttributeError:
             self._queue = None
             for ch in self._channels:
                 if self._queue is None:
                     self._queue = ch.gateway.execmodel.queue.Queue()
 
-                def putreceived(obj, channel=ch):
-                    self._queue.put((channel, obj))
+                def putreceived(obj, channel: Channel = ch) -> None:
+                    self._queue.put((channel, obj))  # type: ignore[union-attr]
 
                 if endmarker is NO_ENDMARKER_WANTED:
                     ch.setcallback(putreceived)
@@ -281,35 +317,56 @@ class MultiChannel:
                     ch.setcallback(putreceived, endmarker=endmarker)
             return self._queue
 
-    def waitclose(self):
+    def waitclose(self) -> None:
         first = None
         for ch in self._channels:
             try:
                 ch.waitclose()
-            except ch.RemoteError:
+            except ch.RemoteError as exc:
                 if first is None:
-                    first = sys.exc_info()
+                    first = exc
         if first:
-            reraise(*first)
+            raise first
 
 
-def safe_terminate(execmodel, timeout, list_of_paired_functions):
-    workerpool = execmodel.WorkerPool()
+TermKillFunc: TypeAlias = Callable[[], object]
+TermKillPair: TypeAlias = tuple[TermKillFunc, TermKillFunc]
 
-    def termkill(termfunc, killfunc):
+
+def safe_terminate(
+    execmodel: ExecModel,
+    timeout: float | None,
+    list_of_paired_functions: Sequence[TermKillPair],
+) -> None:
+    """Run terminate/kill pairs in parallel with a hard wait bound.
+
+    Each termfunc is given ``timeout``.  If it does not finish, killfunc runs.
+    Waiting for the worker pool is also bounded so a stuck kill cannot hang
+    the caller forever (see issues #43 / #221).
+    """
+    workerpool = WorkerPool(execmodel)
+
+    def termkill(termfunc: TermKillFunc, killfunc: TermKillFunc) -> None:
         termreply = workerpool.spawn(termfunc)
         try:
             termreply.get(timeout=timeout)
-        except IOError:
+        except OSError:
             killfunc()
 
-    replylist = []
-    for termfunc, killfunc in list_of_paired_functions:
-        reply = workerpool.spawn(termkill, termfunc, killfunc)
-        replylist.append(reply)
+    replylist = [
+        workerpool.spawn(termkill, termfunc, killfunc)
+        for termfunc, killfunc in list_of_paired_functions
+    ]
+    # Allow term timeout plus a kill attempt; never block indefinitely.
+    wait_timeout = None if timeout is None else timeout * 2
     for reply in replylist:
-        reply.get()
-    workerpool.waitall(timeout=timeout)
+        try:
+            reply.waitfinish(timeout=wait_timeout)
+        except OSError:
+            # termkill still running (typically stuck in killfunc).
+            continue
+        reply.get()  # propagate worker exceptions, if any
+    workerpool.waitall(timeout=wait_timeout)
 
 
 default_group = Group()

@@ -1,32 +1,34 @@
 #! /usr/bin/env python
-# -*- coding: utf-8 -*-
 """
-    start socket based minimal readline exec server
+start socket based minimal readline exec server
 
-    it can exeuted in 2 modes of operation
+it can exeuted in 2 modes of operation
 
-    1. as normal script, that listens for new connections
+1. as normal script, that listens for new connections
 
-    2. via existing_gateway.remote_exec (as imported module)
+2. via existing_gateway.remote_exec (as imported module)
 
 """
+
 # this part of the program only executes on the server side
 #
+from __future__ import annotations
+
 import os
 import sys
+from typing import TYPE_CHECKING
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    from execnet.gateway_base import Channel
+    from execnet.gateway_base import ExecModel
 
 progname = "socket_readline_exec_server-1.2"
 
-
-def get_fcntl():
-    try:
-        import fcntl
-    except ImportError:
-        fcntl = None
-    return fcntl
-
-
-fcntl = get_fcntl()
 
 debug = 0
 
@@ -36,26 +38,20 @@ if debug:  # and not os.isatty(sys.stdin.fileno())
     sys.stdout = sys.stderr = f
 
 
-def print_(*args):
+def print_(*args) -> None:
     print(" ".join(str(arg) for arg in args))
 
 
-if sys.version_info > (3, 0):
-    exec(
-        """def exec_(source, locs):
+exec(
+    """def exec_(source, locs):
     exec(source, locs)"""
-    )
-else:
-    exec(
-        """def exec_(source, locs):
-    exec source in locs"""
-    )
+)
 
 
-def exec_from_one_connection(serversock):
+def exec_from_one_connection(serversock) -> None:
     print_(progname, "Entering Accept loop", serversock.getsockname())
     clientsock, address = serversock.accept()
-    print_(progname, "got new connection from %s %s" % address)
+    print_(progname, "got new connection from {} {}".format(*address))
     clientfile = clientsock.makefile("rb")
     print_("reading line")
     # rstrip so that we can use \r\n for telnet testing
@@ -67,14 +63,14 @@ def exec_from_one_connection(serversock):
         co = compile(source + "\n", "<socket server>", "exec")
         print_(progname, "compiled source, executing")
         try:
-            exec_(co, g)  # noqa
+            exec_(co, g)  # type: ignore[name-defined] # noqa: F821
         finally:
             print_(progname, "finished executing code")
             # background thread might hold a reference to this (!?)
             # clientsock.close()
 
 
-def bind_and_listen(hostport, execmodel):
+def bind_and_listen(hostport: str | tuple[str, int], execmodel: ExecModel):
     socket = execmodel.socket
     if isinstance(hostport, str):
         host, port = hostport.split(":")
@@ -84,7 +80,7 @@ def bind_and_listen(hostport, execmodel):
     if hasattr(fcntl, "FD_CLOEXEC"):
         old = fcntl.fcntl(serversock.fileno(), fcntl.F_GETFD)
         fcntl.fcntl(serversock.fileno(), fcntl.F_SETFD, old | fcntl.FD_CLOEXEC)
-    # allow the address to be re-used in a reasonable amount of time
+    # allow the address to be reused in a reasonable amount of time
     if os.name == "posix" and sys.platform != "cygwin":
         serversock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
@@ -93,7 +89,7 @@ def bind_and_listen(hostport, execmodel):
     return serversock
 
 
-def startserver(serversock, loop=False):
+def startserver(serversock, loop: bool = False) -> None:
     execute_path = os.getcwd()
     try:
         while 1:
@@ -101,14 +97,13 @@ def startserver(serversock, loop=False):
                 exec_from_one_connection(serversock)
             except (KeyboardInterrupt, SystemExit):
                 raise
-            except:
+            except BaseException as exc:
                 if debug:
                     import traceback
 
                     traceback.print_exc()
                 else:
-                    excinfo = sys.exc_info()
-                    print_("got exception", excinfo[1])
+                    print_("got exception", exc)
             os.chdir(execute_path)
             if not loop:
                 break
@@ -120,10 +115,7 @@ def startserver(serversock, loop=False):
 if __name__ == "__main__":
     import sys
 
-    if len(sys.argv) > 1:
-        hostport = sys.argv[1]
-    else:
-        hostport = ":8888"
+    hostport = sys.argv[1] if len(sys.argv) > 1 else ":8888"
     from execnet.gateway_base import get_execmodel
 
     execmodel = get_execmodel("thread")
@@ -131,9 +123,10 @@ if __name__ == "__main__":
     startserver(serversock, loop=True)
 
 elif __name__ == "__channelexec__":
-    chan = globals()["channel"]
+    chan: Channel = globals()["channel"]
     execmodel = chan.gateway.execmodel
     bindname = chan.receive()
+    assert isinstance(bindname, (str, tuple))
     sock = bind_and_listen(bindname, execmodel)
     port = sock.getsockname()
     chan.send(port)

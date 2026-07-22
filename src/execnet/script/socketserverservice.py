@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 A windows service wrapper for the py.execnet socketserver.
 
@@ -6,7 +5,7 @@ To use, run:
  python socketserverservice.py register
  net start ExecNetSocketServer
 """
-import socketserver
+
 import sys
 import threading
 
@@ -16,6 +15,9 @@ import win32evtlogutil
 import win32service
 import win32serviceutil
 
+from execnet.gateway_base import get_execmodel
+
+from . import socketserver
 
 appname = "ExecNetSocketServer"
 
@@ -25,7 +27,7 @@ class SocketServerService(win32serviceutil.ServiceFramework):
     _svc_display_name_ = "%s" % appname
     _svc_deps_ = ["EventLog"]
 
-    def __init__(self, args):
+    def __init__(self, args) -> None:
         # The exe-file has messages for the Event Log Viewer.
         # Register the exe-file as event source.
         #
@@ -37,15 +39,15 @@ class SocketServerService(win32serviceutil.ServiceFramework):
         win32evtlogutil.AddSourceToRegistry(
             self._svc_display_name_, servicemanager.__file__, "Application"
         )
-        win32serviceutil.ServiceFramework.__init__(self, args)
+        super().__init__(args)
         self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
         self.WAIT_TIME = 1000  # in milliseconds
 
-    def SvcStop(self):
+    def SvcStop(self) -> None:
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         win32event.SetEvent(self.hWaitStop)
 
-    def SvcDoRun(self):
+    def SvcDoRun(self) -> None:
         # Redirect stdout and stderr to prevent "IOError: [Errno 9]
         # Bad file descriptor". Windows services don't have functional
         # output streams.
@@ -63,7 +65,8 @@ class SocketServerService(win32serviceutil.ServiceFramework):
 
         hostport = ":8888"
         print("Starting py.execnet SocketServer on %s" % hostport)
-        serversock = socketserver.bind_and_listen(hostport)
+        exec_model = get_execmodel("thread")
+        serversock = socketserver.bind_and_listen(hostport, exec_model)
         thread = threading.Thread(
             target=socketserver.startserver, args=(serversock,), kwargs={"loop": True}
         )

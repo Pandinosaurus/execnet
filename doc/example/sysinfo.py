@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 sysinfo.py [host1] [host2] [options]
 
@@ -6,13 +5,12 @@ obtain system info from remote machine.
 
 (c) Holger Krekel, MIT license
 """
+
 import optparse
 import re
 import sys
 
 import execnet
-import py
-
 
 parser = optparse.OptionParser(usage=__doc__)
 parser.add_option(
@@ -21,8 +19,7 @@ parser.add_option(
     action="store",
     dest="ssh_config",
     default=None,
-    help="use given ssh config file,"
-    " and add info all contained hosts for getting info",
+    help="use given ssh config file, and add info all contained hosts for getting info",
 )
 parser.add_option(
     "-i",
@@ -30,19 +27,20 @@ parser.add_option(
     action="store",
     dest="ignores",
     default=None,
-    help="ignore hosts " "(useful if the list of hostnames come from a file list)",
+    help="ignore hosts (useful if the list of hostnames come from a file list)",
 )
 
 
 def parsehosts(path):
-    path = py.path.local(path)
+    host_regex = re.compile(r"Host\s*(\S+)")
     l = []
-    rex = re.compile(r"Host\s*(\S+)")
-    for line in path.readlines():
-        m = rex.match(line)
-        if m is not None:
-            (sshname,) = m.groups()
-            l.append(sshname)
+
+    with open(path) as fp:
+        for line in fp:
+            m = host_regex.match(line)
+            if m is not None:
+                (sshname,) = m.groups()
+                l.append(sshname)
     return l
 
 
@@ -119,7 +117,7 @@ class RemoteInfo:
 
 
 def debug(*args):
-    print >> sys.stderr, " ".join(map(str, args))
+    print(" ".join(map(str, args)), file=sys.stderr)
 
 
 def error(*args):
@@ -128,21 +126,21 @@ def error(*args):
 
 def getinfo(sshname, ssh_config=None, loginfo=sys.stdout):
     if ssh_config:
-        spec = "ssh=-F {} {}".format(ssh_config, sshname)
+        spec = f"ssh=-F {ssh_config} {sshname}"
     else:
-        spec += "ssh=%s" % sshname
+        spec = "ssh=%s" % sshname
     debug("connecting to", repr(spec))
     try:
         gw = execnet.makegateway(spec)
-    except IOError:
+    except OSError:
         error("could not get sshgatway", sshname)
     else:
         ri = RemoteInfo(gw)
         # print "%s info:" % sshname
         prefix = sshname.upper() + " "
-        print >> loginfo, prefix, "fqdn:", ri.getfqdn()
+        print(prefix, "fqdn:", ri.getfqdn(), file=loginfo)
         for attr in ("sys.platform", "sys.version_info"):
-            loginfo.write("{} {}: ".format(prefix, attr))
+            loginfo.write(f"{prefix} {attr}: ")
             loginfo.flush()
             value = ri.getmodattr(attr)
             loginfo.write(str(value))
@@ -151,12 +149,12 @@ def getinfo(sshname, ssh_config=None, loginfo=sys.stdout):
         memswap = ri.getmemswap()
         if memswap:
             mem, swap = memswap
-            print >> loginfo, prefix, "Memory:", mem, "Swap:", swap
+            print(prefix, "Memory:", mem, "Swap:", swap, file=loginfo)
         cpuinfo = ri.getcpuinfo()
         if cpuinfo:
             numcpu, model = cpuinfo
-            print >> loginfo, prefix, "number of cpus:", numcpu
-            print >> loginfo, prefix, "cpu model", model
+            print(prefix, "number of cpus:", numcpu, file=loginfo)
+            print(prefix, "cpu model", model, file=loginfo)
         return ri
 
 

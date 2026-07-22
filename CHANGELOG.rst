@@ -1,3 +1,69 @@
+2.2.0 (UNRELEASED)
+------------------
+
+* `#380 <https://github.com/pytest-dev/execnet/pull/380>`__: Add support for Python 3.13 and 3.14, and drop EOL 3.8 and 3.9.
+
+2.1.2 (2025-11-11)
+------------------
+
+* `#376 <https://github.com/pytest-dev/execnet/issues/376>`__ fix artifact building - pin minimal version of hatch.
+
+
+2.1.1 (2024-04-08)
+------------------
+
+* `#267 <https://github.com/pytest-dev/execnet/issue/267>`__ Fixed regression
+  in 2.1.0 where the ``strconfig`` argument to ``load``/``loads`` is ignored.
+
+2.1.0 (2024-04-05)
+------------------
+
+* `#243 <https://github.com/pytest-dev/execnet/pull/243>`__: Added ``main_thread_only``
+  execmodel which is derived from the thread execmodel and only executes ``remote_exec``
+  calls in the main thread.
+
+  Callers of ``remote_exec`` must use the returned channel to wait for a task to complete
+  before they call remote_exec again, otherwise the ``remote_exec`` call will fail with a
+  ``concurrent remote_exec would cause deadlock`` error. The main_thread_only execmodel
+  provides solutions for `#96 <https://github.com/pytest-dev/execnet/issues/96>`__ and
+  `pytest-dev/pytest-xdist#620 <https://github.com/pytest-dev/pytest-xdist/issues/620>`__
+  (pending a new `pytest-xdist` release).
+
+  Also fixed ``init_popen_io`` to use ``closefd=False`` for shared stdin and stdout file
+  descriptors, preventing ``Bad file descriptor`` errors triggered by test_stdouterrin_setnull.
+* The library is now typed and the typing is exposed to type-checkers.
+* Re-exported ``Gateway``, ``Channel``, ``DumpError`` and ``LoadError`` from
+  ``execnet``. The constructors are private.
+* Fixed ``GatewayBase.join()`` timeout argument getting ignored.
+* Removed support for Python 3.7.
+* Added official support for Python 3.12.
+
+
+2.0.2 (2023-07-09)
+------------------
+
+* Re-release without code changes, just to include ``tox.ini`` into the source distribution.
+
+2.0.1 (2023-07-08)
+------------------
+
+* Re-release without code changes, just to include docs and tests into the source distribution.
+
+2.0.0 (2023-07-06)
+------------------
+
+* Removed support for Python < 3.7.
+
+  - Applied ``pyupgrade --py37-plus``.
+  - Minimal ``mypy`` fixes and dropped Python 2 support code.
+
+* Migrated packaging to ``hatch``.
+* Dropped deprecated APIs of old makegateway names.
+* Removed ``py`` testing dependency.
+* Explicitly pass ``encoding`` when opening files in the gateway to get rid of warnings when using ``PYTHONWARNDEFAULTENCODING=1`` (#195).
+* Fixed error when loading source code files from a path containing non-ascii characters.
+
+
 1.9.0 (2021-06-13)
 ------------------
 
@@ -93,7 +159,7 @@
   with previous versions and future versions
   additionally stored serialized objects containing complex objects will
   have a incompatible opcode when read with execnet < 1.4.0
-  and wont be loadable with execnet 1.4.0 either
+  and won't be loadable with execnet 1.4.0 either
 
   its strongly suggested to avoid using the Serializer of execnet 1.4.0
   this affects devpi and the external pytest-cache plugin
@@ -105,7 +171,7 @@
   (this also fixes the bpython interaction issues)
 
 - Fix issue38: provide ability to connect to Vagrant VMs easily
-  using :code:`vagrant_ssh=defaut` or :code:`vagrant_ssh=machinename`
+  using :code:`vagrant_ssh=default` or :code:`vagrant_ssh=machinename`
   this feature is experimental and will be refined in future releases.
   Thanks Christian Theune for the discussion and the initial pull request.
 
@@ -147,7 +213,7 @@
 
 - gateway.remote_exec() will now execute in multiple
   threads on the other side by default.  The previous
-  neccessity of running "gateway.remote_init_threads()"
+  necessity of running "gateway.remote_init_threads()"
   to allow for such concurrency is gone.  The latter
   method is now a no-op and will be removed in future
   versions of execnet.
@@ -218,7 +284,7 @@
 - fix issue #2 - properly reconfigure the channels string coercion for rsync,
   so it can send from python2 to python3
 
-- fix issue #9 - propperly terminate the worker threadpools in safe_terminate
+- fix issue #9 - properly terminate the worker threadpools in safe_terminate
 - fix issue #8 - no longer kill remote pids locally on jython ssh gateways
 
 - refactor socketserver, so it can be directly remote_exec'd for starting a socket gateway on a remote
@@ -247,7 +313,7 @@
 1.0.8
 --------------------------------
 
-- new ``gateway.remote_exec(func, **kwargs)`` style fo executing
+- new ``gateway.remote_exec(func, **kwargs)`` style for executing
   a pure function with parameters.  The function on the remote
   side also needs to accept a ``channel`` which allows it to
   communicate back and forth.  Thanks to Ronny Pfannschmidt
@@ -326,7 +392,7 @@
 
 - automatically close a channel when a remote callback raises
   an exception, makes communication more robust because until
-  now failing callbacks rendered the receiverthread unuseable
+  now failing callbacks rendered the receiverthread unusable
   leaving the remote side in-accessible.
 
 - internally split socket gateways, speeds up popen-gateways
@@ -407,7 +473,7 @@
 
 * make internal protocols more robust against serialization failures
 
-* fix a seralization bug with nested tuples containing empty tuples
+* fix a serialization bug with nested tuples containing empty tuples
   (thanks to ronny for discovering it)
 
 * setting the environment variable EXECNET_DEBUG will generate per

@@ -1,18 +1,17 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
 
 small utility for hot-syncing a svn repository through ssh.
 uses execnet.
 
 """
-from __future__ import print_function
 
 import os
+import pathlib
+import subprocess
 import sys
 
 import execnet
-import py
 
 
 def usage():
@@ -22,9 +21,9 @@ def usage():
 
 def main(args):
     remote = args[0]
-    localrepo = py.path.local(args[1])
-    if not localrepo.check(dir=1):
-        raise SystemExit("localrepo {} does not exist".format(localrepo))
+    localrepo = pathlib.Path(args[1])
+    if not localrepo.is_dir():
+        raise SystemExit(f"localrepo {localrepo} does not exist")
     if len(args) == 3:
         configfile = args[2]
     else:
@@ -42,12 +41,18 @@ def main(args):
     # 4. client goes back to step 1
     c = gw.remote_exec(
         """
-        import py
         import os
+        import subprocess
         import time
+
         remote_rev, repopath = channel.receive()
-        while 1:
-            rev = py.process.cmdexec('svnlook youngest "%s"' % repopath)
+        while True:
+            rev = subprocess.run(
+                ["svnlook", "youngest", repopath],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
             rev = int(rev)
             if rev > remote_rev:
                 revrange = (remote_rev+1, rev)
@@ -96,7 +101,7 @@ def svn_load(repo, dumpchannel, maxcount=100):
     # growing buffers  (execnet does not control
     # RAM usage or receive queue sizes)
     dumpchannel.send(maxcount)
-    f = os.popen("svnadmin load -q {}".format(repo), "w")
+    f = os.popen(f"svnadmin load -q {repo}", "w")
     count = maxcount
     for x in dumpchannel:
         sys.stdout.write(".")
@@ -106,12 +111,17 @@ def svn_load(repo, dumpchannel, maxcount=100):
         if count <= 0:
             dumpchannel.send(maxcount)
             count = maxcount
-    print >> sys.stdout
+    print()
     f.close()
 
 
 def get_svn_youngest(repo):
-    rev = py.process.cmdexec('svnlook youngest "%s"' % repo)
+    rev = subprocess.run(
+        ["svnlook", "youngest", repo],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
     return int(rev)
 
 

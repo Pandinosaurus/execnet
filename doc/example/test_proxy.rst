@@ -1,13 +1,13 @@
-Managing Proxied gateways
+Managing proxied gateways
 ==========================
 
-Simple Proxying
+Simple proxying
 ----------------
 
-Using the via arg of specs we can create a gateway
+Using the ``via`` arg of specs we can create a gateway
 whose io is created on a remote gateway and proxied to the master.
 
-The simlest use case, is where one creates one master process
+The simplest use case, is where one creates one master process
 and uses it to control new workers and their environment
 
 ::

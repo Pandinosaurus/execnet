@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 redirect output from remote to a local function
 showcasing features of the channel object:
@@ -8,7 +7,6 @@ showcasing features of the channel object:
 - setting a callback for receiving channel data
 
 """
-from __future__ import print_function
 
 import execnet
 
@@ -23,12 +21,13 @@ outchan = gw.remote_exec(
 """
 ).receive()
 
+
 # note: callbacks execute in receiver thread!
 def write(data):
     print("received:", repr(data))
 
 
-outchan.setcallback(write)
+outchan.setcallback(write)  # type: ignore[attr-defined]
 
 gw.remote_exec(
     """

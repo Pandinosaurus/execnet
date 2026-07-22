@@ -1,25 +1,27 @@
-# -*- coding: utf-8 -*-
-import subprocess
+from __future__ import annotations
+
+import shutil
 import sys
+from collections.abc import Callable
+from collections.abc import Generator
+from collections.abc import Iterator
+from functools import lru_cache
+
+import pytest
 
 import execnet
-import py
-import pytest
-from execnet.gateway_base import get_execmodel
+from execnet.gateway import Gateway
+from execnet.gateway_base import ExecModel
 from execnet.gateway_base import WorkerPool
+from execnet.gateway_base import get_execmodel
 
 collect_ignore = ["build", "doc/_build"]
 
 rsyncdirs = ["conftest.py", "execnet", "testing", "doc"]
 
-winpymap = {
-    "python2.7": r"C:\Python27\python.exe",
-    "python3.4": r"C:\Python34\python.exe",
-}
-
 
 @pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_setup(item):
+def pytest_runtest_setup(item: pytest.Item) -> Generator[None, None, None]:
     if item.fspath.purebasename in ("test_group", "test_info"):
         getspecssh(item.config)  # will skip if no gx given
     yield
@@ -28,17 +30,22 @@ def pytest_runtest_setup(item):
 
 
 @pytest.fixture
-def makegateway(request):
+def group_function() -> Iterator[execnet.Group]:
     group = execnet.Group()
-    request.addfinalizer(lambda: group.terminate(0.5))
-    return group.makegateway
+    yield group
+    group.terminate(0.5)
+
+
+@pytest.fixture
+def makegateway(group_function: execnet.Group) -> Callable[[str], Gateway]:
+    return group_function.makegateway
 
 
 pytest_plugins = ["pytester", "doctest"]
 
 
 # configuration information for tests
-def pytest_addoption(parser):
+def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("execnet", "execnet testing options")
     group.addoption(
         "--gx",
@@ -65,30 +72,30 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture
-def specssh(request):
+def specssh(request: pytest.FixtureRequest) -> execnet.XSpec:
     return getspecssh(request.config)
 
 
 @pytest.fixture
-def specsocket(request):
+def specsocket(request: pytest.FixtureRequest) -> execnet.XSpec:
     return getsocketspec(request.config)
 
 
-def getgspecs(config):
-    return map(execnet.XSpec, config.getvalueorskip("gspecs"))
+def getgspecs(config: pytest.Config) -> list[execnet.XSpec]:
+    return [execnet.XSpec(gspec) for gspec in config.getvalueorskip("gspecs")]
 
 
-def getspecssh(config):
+def getspecssh(config: pytest.Config) -> execnet.XSpec:
     xspecs = getgspecs(config)
     for spec in xspecs:
         if spec.ssh:
-            if not py.path.local.sysfind("ssh"):
+            if not shutil.which("ssh"):
                 pytest.skip("command not found: ssh")
             return spec
     pytest.skip("need '--gx ssh=...'")
 
 
-def getsocketspec(config):
+def getsocketspec(config: pytest.Config) -> execnet.XSpec:
     xspecs = getgspecs(config)
     for spec in xspecs:
         if spec.socket:
@@ -96,7 +103,7 @@ def getsocketspec(config):
     pytest.skip("need '--gx socket=...'")
 
 
-def pytest_generate_tests(metafunc):
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "gw" in metafunc.fixturenames:
         assert "anypython" not in metafunc.fixturenames, "need combine?"
         if hasattr(metafunc.function, "gwtypes"):
@@ -106,64 +113,41 @@ def pytest_generate_tests(metafunc):
         else:
             gwtypes = ["popen", "socket", "ssh", "proxy"]
         metafunc.parametrize("gw", gwtypes, indirect=True)
-    elif "anypython" in metafunc.fixturenames:
-        metafunc.parametrize(
-            "anypython",
-            indirect=True,
-            argvalues=("sys.executable", "python2.7", "pypy", "jython"),
-        )
 
 
-def getexecutable(name, cache={}):
-    try:
-        return cache[name]
-    except KeyError:
-        if name == "sys.executable":
-            return py.path.local(sys.executable)
-        executable = py.path.local.sysfind(name)
-        if executable:
-            if name == "jython":
-                popen = subprocess.Popen(
-                    [str(executable), "--version"],
-                    universal_newlines=True,
-                    stderr=subprocess.PIPE,
-                )
-                out, err = popen.communicate()
-                if not err or "2.5" not in err:
-                    executable = None
-        cache[name] = executable
-        return executable
+@lru_cache
+def getexecutable(name: str) -> str | None:
+    if name == "sys.executable":
+        return sys.executable
+    return shutil.which(name)
 
 
-@pytest.fixture
-def anypython(request):
+@pytest.fixture(params=("sys.executable", "pypy3"))
+def anypython(request: pytest.FixtureRequest) -> str:
     name = request.param
     executable = getexecutable(name)
     if executable is None:
-        if sys.platform == "win32":
-            executable = winpymap.get(name, None)
-            if executable:
-                executable = py.path.local(executable)
-                if executable.check():
-                    return executable
-                executable = None
-        pytest.skip("no {} found".format(name))
+        pytest.skip(f"no {name} found")
     if "execmodel" in request.fixturenames and name != "sys.executable":
         backend = request.getfixturevalue("execmodel").backend
-        if backend != "thread":
-            pytest.xfail("cannot run {!r} execmodel with bare {}".format(backend, name))
+        if backend not in ("thread", "main_thread_only"):
+            pytest.xfail(f"cannot run {backend!r} execmodel with bare {name}")
     return executable
 
 
 @pytest.fixture(scope="session")
-def group():
+def group() -> Iterator[execnet.Group]:
     g = execnet.Group()
     yield g
     g.terminate(timeout=1)
 
 
 @pytest.fixture
-def gw(request, execmodel, group):
+def gw(
+    request: pytest.FixtureRequest,
+    execmodel: ExecModel,
+    group: execnet.Group,
+) -> Gateway:
     try:
         return group[request.param]
     except KeyError:
@@ -178,30 +162,31 @@ def gw(request, execmodel, group):
                 proxygw = group.makegateway("popen//id=%s" % pname)
             # assert group['proxygw'].remote_status().receiving
             gw = group.makegateway(
-                "socket//id=socket//installvia=%s"
-                "//execmodel=%s" % (pname, execmodel.backend)
+                f"socket//id=socket//installvia={pname}//execmodel={execmodel.backend}"
             )
-            gw.proxygw = proxygw
+            # TODO(typing): Clarify this assignment.
+            gw.proxygw = proxygw  # type: ignore[attr-defined]
             assert pname in group
         elif request.param == "ssh":
             sshhost = request.getfixturevalue("specssh").ssh
             # we don't use execmodel.backend here
             # but you can set it when specifying the ssh spec
-            gw = group.makegateway("ssh={}//id=ssh".format(sshhost))
+            gw = group.makegateway(f"ssh={sshhost}//id=ssh")
         elif request.param == "proxy":
             group.makegateway("popen//id=proxy-transport")
             gw = group.makegateway(
-                "popen//via=proxy-transport//id=proxy"
-                "//execmodel=%s" % execmodel.backend
+                "popen//via=proxy-transport//id=proxy//execmodel=%s" % execmodel.backend
             )
         else:
-            assert 0, "unknown execmodel: {}".format(request.param)
+            assert 0, f"unknown execmodel: {request.param}"
         return gw
 
 
-@pytest.fixture(params=["thread", "eventlet", "gevent"], scope="session")
-def execmodel(request):
-    if request.param != "thread":
+@pytest.fixture(
+    params=["thread", "main_thread_only", "eventlet", "gevent"], scope="session"
+)
+def execmodel(request: pytest.FixtureRequest) -> ExecModel:
+    if request.param not in ("thread", "main_thread_only"):
         pytest.importorskip(request.param)
     if request.param in ("eventlet", "gevent") and sys.platform == "win32":
         pytest.xfail(request.param + " does not work on win32")
@@ -209,5 +194,5 @@ def execmodel(request):
 
 
 @pytest.fixture
-def pool(execmodel):
+def pool(execmodel: ExecModel) -> WorkerPool:
     return WorkerPool(execmodel=execmodel)

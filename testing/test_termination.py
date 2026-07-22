@@ -1,13 +1,20 @@
-# -*- coding: utf-8 -*-
+import os
+import pathlib
+import shutil
+import signal
 import subprocess
 import sys
+from collections.abc import Callable
 
-import execnet
-import py
 import pytest
 from test_gateway import TESTTIMEOUT
 
-execnetdir = py.path.local(execnet.__file__).dirpath().dirpath()
+import execnet
+from execnet.gateway import Gateway
+from execnet.gateway_base import ExecModel
+from execnet.gateway_base import WorkerPool
+
+execnetdir = pathlib.Path(execnet.__file__).parent.parent
 
 skip_win_pypy = pytest.mark.xfail(
     condition=hasattr(sys, "pypy_version_info") and sys.platform.startswith("win"),
@@ -15,7 +22,9 @@ skip_win_pypy = pytest.mark.xfail(
 )
 
 
-def test_exit_blocked_worker_execution_gateway(anypython, makegateway, pool):
+def test_exit_blocked_worker_execution_gateway(
+    anypython: str, makegateway: Callable[[str], Gateway], pool: WorkerPool
+) -> None:
     gateway = makegateway("popen//python=%s" % anypython)
     gateway.remote_exec(
         """
@@ -24,7 +33,7 @@ def test_exit_blocked_worker_execution_gateway(anypython, makegateway, pool):
     """
     )
 
-    def doit():
+    def doit() -> int:
         gateway.exit()
         return 17
 
@@ -33,8 +42,10 @@ def test_exit_blocked_worker_execution_gateway(anypython, makegateway, pool):
     assert x == 17
 
 
-def test_endmarker_delivery_on_remote_killterm(makegateway, execmodel):
-    if execmodel.backend != "thread":
+def test_endmarker_delivery_on_remote_killterm(
+    makegateway: Callable[[str], Gateway], execmodel: ExecModel
+) -> None:
+    if execmodel.backend not in ("thread", "main_thread_only"):
         pytest.xfail("test and execnet not compatible to greenlets yet")
     gw = makegateway("popen")
     q = execmodel.queue.Queue()
@@ -46,7 +57,8 @@ def test_endmarker_delivery_on_remote_killterm(makegateway, execmodel):
     """
     )
     pid = channel.receive()
-    py.process.kill(pid)
+    assert isinstance(pid, int)
+    os.kill(pid, signal.SIGTERM)
     channel.setcallback(q.put, endmarker=999)
     val = q.get(TESTTIMEOUT)
     assert val == 999
@@ -55,8 +67,10 @@ def test_endmarker_delivery_on_remote_killterm(makegateway, execmodel):
 
 
 @skip_win_pypy
-def test_termination_on_remote_channel_receive(monkeypatch, makegateway):
-    if not py.path.local.sysfind("ps"):
+def test_termination_on_remote_channel_receive(
+    monkeypatch: pytest.MonkeyPatch, makegateway: Callable[[str], Gateway]
+) -> None:
+    if not shutil.which("ps"):
         pytest.skip("need 'ps' command to externally check process status")
     monkeypatch.setenv("EXECNET_DEBUG", "2")
     gw = makegateway("popen")
@@ -64,14 +78,14 @@ def test_termination_on_remote_channel_receive(monkeypatch, makegateway):
     gw.remote_exec("channel.receive()")
     gw._group.terminate()
     command = ["ps", "-p", str(pid)]
-    popen = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    out, err = popen.communicate()
-    out = py.builtin._totext(out, "utf8")
-    assert str(pid) not in out, out
+    output = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert str(pid) not in output.stdout, output
 
 
-def test_close_initiating_remote_no_error(testdir, anypython):
-    p = testdir.makepyfile(
+def test_close_initiating_remote_no_error(
+    pytester: pytest.Pytester, anypython: str
+) -> None:
+    p = pytester.makepyfile(
         """
         import sys
         sys.path.insert(0, sys.argv[1])
@@ -86,20 +100,28 @@ def test_close_initiating_remote_no_error(testdir, anypython):
     """
     )
     popen = subprocess.Popen(
-        [str(anypython), str(p), str(execnetdir)], stdout=None, stderr=subprocess.PIPE
+        [anypython, str(p), str(execnetdir)], stdout=None, stderr=subprocess.PIPE
     )
-    out, err = popen.communicate()
+    _out, err = popen.communicate()
     print(err)
-    err = err.decode("utf8")
-    lines = [x for x in err.splitlines() if "*sys-package" not in x]
-    # print (lines)
+    errstr = err.decode("utf8")
+    lines = [x for x in errstr.splitlines() if "*sys-package" not in x]
     assert not lines
 
 
-def test_terminate_implicit_does_trykill(testdir, anypython, capfd, pool):
-    if pool.execmodel != "thread":
+def test_terminate_implicit_does_trykill(
+    pytester: pytest.Pytester,
+    anypython: str,
+    capfd: pytest.CaptureFixture[str],
+    pool: WorkerPool,
+) -> None:
+    if pool.execmodel.backend not in ("thread", "main_thread_only"):
         pytest.xfail("only os threading model supported")
-    p = testdir.makepyfile(
+    if sys.version_info >= (3, 12):
+        pytest.xfail(
+            "since python3.12 this test triggers RuntimeError: can't create new thread at interpreter shutdown"
+        )
+    p = pytester.makepyfile(
         """
         import sys
         sys.path.insert(0, %r)
@@ -125,9 +147,10 @@ def test_terminate_implicit_does_trykill(testdir, anypython, capfd, pool):
     )
     popen = subprocess.Popen([str(anypython), str(p)], stdout=subprocess.PIPE)
     # sync with start-up
+    assert popen.stdout is not None
     popen.stdout.readline()
     reply = pool.spawn(popen.communicate)
     reply.get(timeout=50)
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     lines = [x for x in err.splitlines() if "*sys-package" not in x]
     assert not lines or "Killed" in err

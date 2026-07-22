@@ -6,7 +6,7 @@ execnet ad-hoc instantiates local and remote Python interpreters.
 Each interpreter is accessible through a **Gateway** which manages
 code and data communication.  **Channels** allow to exchange
 data between the local and the remote end.  **Groups**
-help to manage creation and termination of sub interpreters.
+help to manage creation and termination of sub-interpreters.
 
 .. image:: _static/basic1.png
 
@@ -26,10 +26,10 @@ Here is an example which instantiates a simple Python subprocess::
 
     >>> gateway = execnet.makegateway()
 
-gateways allow to `remote execute code`_ and
+Gateways allow to `remote execute code`_ and
 `exchange data`_ bidirectionally.
 
-examples for valid gateway specifications
+Examples for valid gateway specifications
 -------------------------------------------
 
 * ``ssh=wyvern//python=python3.3//chdir=mycache`` specifies a Python3.3
@@ -82,7 +82,7 @@ in the instantiated subprocess-interpreter:
 .. automethod:: Gateway.remote_exec(source)
 
 It is allowed to pass a module object as source code
-in which case it's source code will be obtained and
+in which case its source code will be obtained and
 get sent for remote execution.  ``remote_exec`` returns
 a channel object whose symmetric counterpart channel
 is available to the remotely executing source.
@@ -90,7 +90,7 @@ is available to the remotely executing source.
 
 .. method:: Gateway.reconfigure([py2str_as_py3str=True, py3str_as_py2str=False])
 
-    reconfigures the string-coercion behaviour of the gateway
+    Reconfigures the string-coercion behaviour of the gateway
 
 .. _`Channel`:
 .. _`channel-api`:
@@ -130,7 +130,7 @@ and manage the final termination procedure:
 
 .. automethod:: Group.terminate(timeout=None)
 
-This method is implicitely called for each gateway group at
+This method is implicitly called for each gateway group at
 process-exit, using a small timeout.  This is fine
 for interactive sessions or random scripts which
 you rather like to error out than hang.  If you start many
@@ -138,14 +138,14 @@ processes then you often want to call ``group.terminate()``
 yourself and specify a larger or not timeout.
 
 
-threading models: gevent, eventlet, thread
-===========================================
+threading models: gevent, eventlet, thread, main_thread_only
+====================================================================
 
 .. versionadded:: 1.2 (status: experimental!)
 
-execnet supports "thread", "eventlet" and "gevent" as thread models
-on each of the two sides.  You need to decide which model to use
-before you create any gateways::
+execnet supports "main_thread_only", "thread", "eventlet" and "gevent"
+as thread models on each of the two sides.  You need to decide which
+model to use before you create any gateways::
 
     # content of threadmodel.py
     import execnet
@@ -164,17 +164,10 @@ you can execute this little test file::
     <RInfo 'numchannels=0, numexecuting=0, execmodel=thread'>
     1
 
-.. note::
-
-    With python3 you can (as of December 2013) only use the thread model
-    because neither eventlet-0.14.0 nor gevent-1.0 support Python3.
-    When they start to support Python3, execnet will probably just work
-    because it is itself Python3 compatible.
-
 How to execute in the main thread
 ------------------------------------------------
 
-When the remote side of a gateway uses the 'thread' model, execution
+When the remote side of a gateway uses the "thread" model, execution
 will preferably run in the main thread.  This allows GUI loops
 or other code to behave correctly.  If you, however, start multiple
 executions concurrently, they will run in non-main threads.
@@ -227,7 +220,7 @@ configure a tracing mechanism:
 .. _`dumps/loads`:
 .. _`dumps/loads API`:
 
-cross-interpreter serialization of python objects
+Cross-interpreter serialization of Python objects
 =======================================================
 
 .. versionadded:: 1.1

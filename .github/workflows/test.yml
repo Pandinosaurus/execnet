@@ -1,0 +1,66 @@
+name: test
+
+on:
+  push:
+    branches:
+      - "master"
+      - "test-me-*"
+
+  pull_request:
+    branches:
+      - "master"
+
+# Cancel running jobs for the same workflow and branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Build and Check Package
+      uses: hynek/build-and-inspect-python-package@v2.18
+
+  test:
+
+    needs: [package]
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ windows-latest, ubuntu-latest ]
+        python: [ "3.10", "3.11", "3.12", "3.13", "3.14", "pypy-3.11" ]
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Download Package
+      uses: actions/download-artifact@v8
+      with:
+        name: Packages
+        path: dist
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ matrix.python }}
+
+    - name: Install dependencies
+      run: pip install tox twine
+
+    - name: Check package
+      shell: bash
+      run: |
+        twine check --strict dist/*
+
+    - name: Test
+      shell: bash
+      run: |
+        tox run -e py --installpkg `find dist/*.tar.gz`
